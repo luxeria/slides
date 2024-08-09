@@ -1,2 +1,3 @@
-# slides
-Archiv für Vortragsslides
+# Slides
+
+Repo für Vortragsslides.

@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Running LLMs Locally</title>
+<style>
+  :root {
+    /* pastel palette */
+    --bg:        #faf7f4;   /* warm paper */
+    --ink:       #3a3548;   /* soft deep lavender-gray */
+    --muted:     #8b8395;
+    --accent:    #b58ec7;   /* soft lilac */
+    --accent-2:  #8ec7b0;   /* sage mint */
+    --accent-3:  #f0b8a0;   /* peach */
+    --accent-4:  #9fb6d9;   /* baby blue */
+
+    --blob1: #f2cfe1;   /* blush pink */
+    --blob2: #d4e5f5;   /* soft sky */
+    --blob3: #d9ecd9;   /* pale green */
+
+    --card-bg:   rgba(255,255,255,.55);
+    --radius:    22px;
+    --shadow:    0 20px 50px -25px rgba(90,70,110,.25);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans:  -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  /* soft floating background blobs */
+  .blob { position: fixed; border-radius: 50%; filter: blur(70px); opacity: .45; z-index: 0; pointer-events: none; }
+  .blob.b1 { width: 30vw; height: 30vw; background: var(--blob1); top: -14vw; left: -16vw; }
+  .blob.b2 { width: 28vw; height: 28vw; background: var(--blob2); bottom: -16vw; right: -14vw; }
+  .blob.b3 { width: 20vw; height: 20vw; background: var(--blob3); bottom: -6vw; left: -5vw; }
+
+  /* grain overlay for a soft, tactile finish */
+  .grain {
+    position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: .05;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .deck { position: relative; z-index: 2; height: 100%; }
+
+  /* ---------- slides ---------- */
+  section.slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    justify-content: center;
+    padding: 9vh 9vw;
+    opacity: 0; transform: translateY(22px) scale(.99);
+    pointer-events: none;
+    transition: opacity .6s cubic-bezier(.22,.61,.36,1), transform .6s cubic-bezier(.22,.61,.36,1);
+  }
+  section.slide.active { opacity: 1; transform: none; pointer-events: auto; z-index: 2; position: absolute; }
+  section.slide.active .reveal {
+    opacity: 1; transform: none;
+    transition: opacity .55s ease var(--d, 0s), transform .55s ease var(--d, 0s);
+  }
+
+  .inner { max-width: 1000px; margin: 0 auto; width: 100%; }
+
+  /* staggered reveal of direct children */
+  .reveal { opacity: 0; transform: translateY(18px); }
+
+  /* ---------- typography ---------- */
+  .kicker {
+    font-family: var(--sans); font-size: .72rem; letter-spacing: .22em;
+    text-transform: uppercase; font-weight: 600; color: var(--accent); margin-bottom: 1.4rem;
+  }
+  h1 {
+    font-family: var(--serif); font-weight: 600; font-size: clamp(2.6rem, 5.6vw, 4.6rem);
+    line-height: 1.08; letter-spacing: -.01em; color: var(--ink);
+  }
+  h1 .thin { font-weight: 400; color: var(--muted); font-style: italic; }
+  .subtitle { margin-top: 1.5rem; font-size: clamp(1.05rem, 1.8vw, 1.4rem); color: var(--muted); max-width: 44ch; line-height: 1.55; }
+  h2 {
+    font-family: var(--serif); font-weight: 600; font-size: clamp(1.9rem, 3.6vw, 2.9rem);
+    letter-spacing: -.01em; margin-bottom: 1.2rem;
+  }
+  h2 .accent-word { color: var(--accent); }
+  .lead { font-size: clamp(1rem, 1.7vw, 1.3rem); color: var(--muted); line-height: 1.6; max-width: 58ch; }
+  .lead strong, p strong { color: var(--ink); font-weight: 600; }
+
+  .foot {
+    position: absolute; bottom: 4.5vh; left: 9vw; right: 9vw;
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: .8rem; color: var(--muted); letter-spacing: .02em;
+  }
+  .foot .hint { opacity: .75; display: flex; align-items: center; gap: .6rem; }
+  .foot .hint kbd { font-family: var(--sans); background: rgba(181,142,199,.14); color: var(--accent); border: 1px solid rgba(181,142,199,.25); padding: .05rem .35rem; border-radius: 5px; font-size: .72rem; }
+
+  /* ---------- cards ---------- */
+  .grid { display: grid; gap: 1.1rem; margin-top: 2.2rem; }
+  .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid.cols-5 { grid-template-columns: repeat(5, 1fr); }
+
+  .card {
+    background: var(--card-bg);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.7);
+    border-radius: var(--radius);
+    padding: 1.5rem 1.4rem;
+    box-shadow: var(--shadow);
+    transition: transform .35s ease, box-shadow .35s ease;
+  }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 26px 60px -22px rgba(90,70,110,.35); }
+  .card .icon {
+    width: 2.5rem; height: 2.5rem; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.25rem; margin-bottom: 1rem;
+  }
+  .card h3 { font-size: 1.02rem; font-weight: 600; margin-bottom: .45rem; }
+  .card p { font-size: .88rem; color: var(--muted); line-height: 1.5; }
+  .card h3 a { color: var(--ink); text-decoration: none; }
+  .card h3 a:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .card ul { list-style: none; margin-top: .15rem; }
+  .card ul li { position: relative; padding-left: 1rem; font-size: .88rem; color: var(--muted); line-height: 1.45; margin-bottom: .32rem; }
+  .card ul li:last-child { margin-bottom: 0; }
+  .card ul li::before { content: ""; position: absolute; left: 0; top: .5em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: .7; }
+  .card ul li strong { color: var(--ink); font-weight: 600; }
+  .card .tag, .img-card .tag { display: inline-block; font-size: .68rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; border-radius: 999px; padding: .18rem .5rem; margin-bottom: .6rem; }
+
+  .icon.pink  { background: var(--blob1); }
+  .icon.blue  { background: var(--blob2); }
+  .icon.green { background: var(--blob3); }
+  .icon.peach { background: #fbe4d8; }
+
+  .tag.pink  { background: var(--blob1); color: #8d4a6b; }
+  .tag.blue  { background: var(--blob2); color: #4a6b8d; }
+  .tag.green { background: var(--blob3); color: #4a7d5c; }
+  .tag.peach { background: #fbe4d8; color: #9c5a37; }
+
+  /* ---------- lists ---------- */
+  ul.bullets { list-style: none; margin-top: 2rem; max-width: 640px; font-family: var(--sans); }
+  ul.bullets a { color: var(--accent); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+  .img-card a { text-decoration: none; color: inherit; }
+  ul.bullets li { position: relative; padding: .48rem 0 .48rem 2.2rem; font-size: clamp(1rem, 1.7vw, 1.25rem); color: var(--ink); line-height: 1.45; }
+  ul.bullets li:last-child { border-bottom: none; }
+  ul.bullets li::before {
+    content: ""; position: absolute; left: 0; top: 1.25rem;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); opacity: .8;
+  }
+  ul.bullets li span { color: var(--muted); }
+
+  /* ---------- stats ---------- */
+  .stat { text-align: center; }
+  .stat .num { font-family: var(--serif); font-size: clamp(2rem, 3.8vw, 2.8rem); font-weight: 600; color: var(--accent); }
+  .stat .label { font-size: .85rem; color: var(--muted); margin-top: .2rem; line-height: 1.4; }
+
+  /* ---------- code ---------- */
+  pre.code {
+    background: rgba(255,255,255,.55); border: 1px solid rgba(255,255,255,.7);
+    border-radius: var(--radius); padding: 1.3rem 1.5rem;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+    font-size: .9rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    box-shadow: var(--shadow); margin-top: 2rem;
+  }
+  pre.code .c { color: var(--muted); }
+  pre.code .k { color: var(--accent); }
+  pre.code .v { color: var(--accent-3); }
+  pre.code span {  }
+
+  /* ---------- callout ---------- */
+  .callout { display: flex; gap: 1.1rem; align-items: flex-start; background: var(--card-bg); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.7); border-radius: var(--radius); padding: 1.4rem 1.5rem; box-shadow: var(--shadow); margin-top: 2rem; max-width: 680px; }
+  .callout .emoji { font-size: 1.6rem; line-height: 1; }
+  .callout p { font-size: 1.02rem; color: var(--ink); line-height: 1.55; }
+  .callout p span { color: var(--muted); }
+
+  /* ---------- image gallery cards ---------- */
+  .img-card {
+    position: relative;
+    background: #fff; border-radius: 20px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,.7); box-shadow: var(--shadow);
+    text-align: center;
+  }
+  .img-card img { width: 100%; height: 230px; object-fit: contain; display: block; background: #fff; padding: 1rem; }
+  .img-card img.shot { height: 340px; }
+  .img-card .shot-cap { padding: 1.05rem 1.15rem; font-size: 1.12rem; color: var(--ink); background: #fff; border-bottom: 1px solid rgba(90,70,110,.08); font-weight: 600; }
+  .img-card .shot-cap span { color: var(--muted); font-weight: 400; font-size: .9rem; margin-left: .55rem; }
+  .img-card a:hover .shot-cap { color: var(--accent); }
+  .img-card .shot-cap.bubble { background: var(--blob2); color: #3a5a86; border-bottom: none; }
+  .img-card .shot-cap.mint { background: var(--blob3); color: #3f7355; border-bottom: none; }
+  .img-card .shot-cap.bubble span, .img-card .shot-cap.mint span { color: inherit; opacity: .7; font-size: .9rem; margin-left: .55rem; font-weight: 400; }
+  .img-card .cap { padding: .75rem 1rem .9rem; font-size: .85rem; color: var(--muted); letter-spacing: .02em; }
+  .img-card .cap b { color: var(--ink); font-weight: 600; }
+  .img-card .tag { position: absolute; top: .7rem; left: .7rem; }
+
+  /* ---------- careful table for sizes ---------- */
+  table.metal {
+    width: 100%; max-width: 820px; margin-top: 2.2rem;
+    border-collapse: separate; border-spacing: 0; overflow: hidden;
+    background: var(--card-bg); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.7); border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+  table.metal th, table.metal td { padding: 1rem 1.4rem; text-align: left; }
+  table.metal thead th { font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; color: var(--accent); border-bottom: 1px solid rgba(90,70,110,.12); }
+  table.metal tbody tr { border-bottom: 1px solid rgba(90,70,110,.08); }
+  table.metal tbody tr:last-child { border-bottom: none; }
+  table.metal tbody td { font-size: .98rem; }
+  table.metal tbody td.name { font-family: var(--serif); font-weight: 600; font-size: 1.05rem; white-space: nowrap; }
+  table.metal tbody td { color: var(--muted); }
+  table.metal tbody tr:hover td { color: var(--ink); }
+  table.metal td.dot { width: 12px; padding-right: 0; }
+  table.metal td.dot i { display: block; width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ---------- closing ---------- */
+  .thanks { text-align: center; }
+  .thanks h1 { margin-bottom: 1rem; }
+  .thanks .links { margin-top: 2.2rem; display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+  .chip { font-size: .85rem; color: var(--muted); background: var(--card-bg); border: 1px solid rgba(255,255,255,.7); padding: .55rem 1rem; border-radius: 999px; box-shadow: var(--shadow); }
+
+  .emoji-row { font-size: 1.9rem; margin-bottom: 1.4rem; letter-spacing: .4rem; }
+
+  /* ---------- progress + counter ---------- */
+  .progress { position: fixed; bottom: 0; left: 0; height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); width: 0; z-index: 5; transition: width .5s ease; border-radius: 0 3px 3px 0; }
+  .counter { position: fixed; bottom: 3vh; right: 2vw; z-index: 5; font-family: var(--sans); font-size: .8rem; color: var(--muted); letter-spacing: .08em; }
+  .counter b { color: var(--ink); }
+
+  .fullscreen-btn {
+    position: fixed; bottom: 3vh; left: 50%; transform: translateX(-50%); z-index: 6;
+    display: flex; align-items: center; gap: .45rem;
+    font-family: var(--sans); font-size: .78rem; letter-spacing: .04em; color: var(--muted);
+    background: var(--card-bg); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.7); border-radius: 999px;
+    padding: .45rem .85rem; cursor: pointer; opacity: .8;
+    box-shadow: var(--shadow);
+    transition: opacity .3s ease, transform .3s ease, color .3s ease;
+  }
+  .fullscreen-btn:hover { opacity: 1; transform: translateX(-50%) translateY(-2px); color: var(--ink); }
+  .fullscreen-btn svg { width: 14px; height: 14px; }
+  .fullscreen-btn kbd {
+    font-family: var(--sans); background: rgba(181,142,199,.14); color: var(--accent);
+    border: 1px solid rgba(181,142,199,.25); padding: .05rem .35rem; border-radius: 5px; font-size: .72rem;
+  }
+  .fullscreen-btn.hidden { display: none; }
+
+  @media (max-width: 760px) {
+    .grid.cols-3, .grid.cols-4, .grid.cols-5 { grid-template-columns: repeat(2, 1fr); }
+    section.slide { padding: 6vh 7vw; }
+    .foot { left: 7vw; right: 7vw; }
+    .foot .hint { display: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="blob b1"></div>
+  <div class="blob b2"></div>
+  <div class="blob b3"></div>
+  <div class="grain"></div>
+  <div class="progress" id="progress"></div>
+  <div class="counter"><b id="cur">1</b> / <span id="total">1</span></div>
+  <button class="fullscreen-btn" id="fullscreenBtn" title="Toggle fullscreen" aria-label="Toggle fullscreen">
+    <kbd>F</kbd>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+    <span id="fullscreenLabel">Fullscreen</span>
+  </button>
+
+  <main class="deck" id="deck">
+
+    <!-- 1 · Title -->
+    <section class="slide active">
+      <div class="inner">
+        <h1 class="reveal" style="--d:.06s">Running LLMs<br><span class="thin">on your own machine</span></h1>
+        <p class="subtitle reveal" style="--d:.12s">Why it matters, what you actually need, and how I do it</p>
+        <div class="foot">
+          <div class="hint">08.08.2026</div>
+          <div class="hint"><kbd>←</kbd> <kbd>→</kbd> or <kbd>click</kbd> <kbd>drag</kbd> to navigate</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 2 · Why go local -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">The case</div>
+        <h2 class="reveal">Why run models locally?</h2>
+        <div class="grid cols-2">
+          <div class="card reveal" style="--d:.04s">
+            <div class="icon pink">🔒</div>
+            <h3>Privacy</h3>
+            <ul>
+              <li>Your prompts &amp; data stay on-device</li>
+              <li>Nothing logged, cached, or used for training</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.08s">
+            <div class="icon blue">💸</div>
+            <h3>Cost</h3>
+            <ul>
+              <li>Flat, predictable cost</li>
+              <li>No per-token charges, free forever</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.12s">
+            <div class="icon green">🛰️</div>
+            <h3>Offline &amp; always on</h3>
+            <ul>
+              <li>Works with no internet</li>
+              <li>No rate limits, outages, or third parties</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.16s">
+            <div class="icon peach">🎛️</div>
+            <h3>Control</h3>
+            <ul>
+              <li>Pick model, quantization &amp; settings</li>
+              <li>Fine-tune, swap, or train your own</li>
+              <li>Run uncensored models or special configurations</li>
+            </ul>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="hint">Why go local</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 · Hardware math -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Reality check</div>
+        <h2 class="reveal">What does “local” actually need?</h2>
+        <p class="lead reveal" style="--d:.06s">The model <strong>parameters</strong> (weights) must fit in your RAM (<strong>VRAM</strong> or unified memory).</p>
+        <table class="metal reveal" style="--d:.1s">
+          <thead>
+            <tr><th></th><th>Model size</th><th>What it means for you</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="dot"><i style="background:#f2cfe1"></i></td>
+              <td class="name">1–4B</td>
+              <td>Usable for very specific tasks only</td>
+            </tr>
+            <tr>
+              <td class="dot"><i style="background:#d4e5f5"></i></td>
+              <td class="name">4–14B</td>
+              <td>Can produce coherent results, but YMMV</td>
+            </tr>
+            <tr>
+              <td class="dot"><i style="background:#d9ecd9"></i></td>
+              <td class="name">14–70B</td>
+              <td>Very useful if you know how to use it</td>
+            </tr>
+            <tr>
+              <td class="dot"><i style="background:#fbe4d8"></i></td>
+              <td class="name">70B+</td>
+              <td>Needs dedicated hardware</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="foot">
+          <div class="hint">Hardware</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 · Beyond local -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">The bigger picture</div>
+        <h2 class="reveal">Beyond affordable laptop hardware</h2>
+        <ul class="bullets">
+          <li class="reveal" style="--d:.04s">Intelligence of LLMs scale together with <strong>more parameters</strong></li>
+          <li class="reveal" style="--d:.1s">Huge models are <strong>“smarter”</strong><span>(read: more usable / less annoying)</span></li>
+            <li class="reveal" style="--d:.16s"><strong>“Mid Tier”</strong> models <strong>somewhat doable</strong> for enthusiasts</li>
+            <li class="reveal" style="--d:.22s"><strong>“Big Boys”</strong> exclusively served in remote data centers 🌍</li>
+        </ul>
+        <div class="grid cols-2" style="margin-top:2rem">
+          <div class="card reveal" style="--d:.12s">
+            <div class="icon green">📊</div>
+            <h3>70B – 500B</h3>
+            <ul>
+              <li>Mid-tier models</li>
+              <li>Powerful, genuinely useful assistance</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.18s">
+            <div class="icon pink">🚀</div>
+            <h3>500B → many T</h3>
+            <ul>
+              <li>Frontier, state-of-the-art</li>
+              <li>Strong reasoning, coding, hacking</li>
+            </ul>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="hint">Beyond local</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5 · Choosing a model -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">The decision</div>
+        <h2 class="reveal">Which model should you pick?</h2>
+        <ul class="bullets">
+          <li class="reveal" style="--d:.04s"><strong>Bigger is better:</strong> <span>pick the largest model you can, with the best benchmarks.</span></li>
+          <li class="reveal" style="--d:.1s"><strong>Benchmaxxing exists:</strong> <span>but it’s not that bad.</span></li>
+          <li class="reveal" style="--d:.16s"><strong>Prefer a MoE model</strong> <span>(mixture of experts) over a dense one; only some parameters are active for each token, so inference is much faster.</span></li>
+          <li class="reveal" style="--d:.22s"><strong>They move fast:</strong> <span>“which one to pick” changes about every month</span></li>
+        </ul>
+        <div class="foot">
+          <div class="hint">Models</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6 · Quantization -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Tricks</div>
+        <h2 class="reveal">Quantization: <span class="accent-word">shrink</span> without losing much</h2>
+        <ul class="bullets" style="margin-top:1.4rem">
+            <li class="reveal" style="--d:.04s">Models are born at <strong>16-bit</strong> precision</li>
+            <li class="reveal" style="--d:.1s">At 16-bit: <strong>B parameters * 2 = GB vRAM needed</strong> (+ some overhead)</li>
+            <li class="reveal" style="--d:.16s"><strong>Quantization stores weights in fewer bits</strong></li>
+          <li class="reveal" style="--d:.22s">Cuts memory dramatically while quality stays surprisingly close</li>
+        </ul>
+        <div class="grid cols-4" style="margin-top:1.8rem">
+          <div class="card reveal" style="--d:.1s">
+            <div class="tag pink">16-bit</div>
+            <h3>Full</h3>
+            <ul>
+              <li>~16 GB for an 8B</li>
+              <li>Reference quality</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.14s">
+            <div class="tag blue">8-bit</div>
+            <h3>Q8</h3>
+            <ul>
+              <li>~8 GB</li>
+                <li><strong>Near-lossless</strong></li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.18s">
+            <div class="tag green">4-bit</div>
+            <h3>Q4</h3>
+            <ul>
+              <li>~4 GB</li>
+              <li>Quality trade-off</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.22s">
+            <div class="tag peach">2-bit</div>
+            <h3>Q2</h3>
+            <ul>
+              <li>~2 GB</li>
+              <li>Heavily compressed, noticeably degraded</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout reveal" style="--d:.28s">
+          <div class="emoji">🎯</div>
+          <p><strong>Practical advice:</strong> <span>default to 8-bit (Q8 / FP8) quants.</span></p>
+        </div>
+        <div class="foot">
+          <div class="hint">Quantization</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 7 · Hardware options -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Hardware</div>
+        <h2 class="reveal">Hardware options</h2>
+        <p class="lead reveal" style="--d:.06s">Three ways to host models, <strong>in order of affordability</strong>.</p>
+        <div class="grid cols-3" style="margin-top:2rem">
+          <div class="card reveal" style="--d:.1s">
+            <div class="tag green">Most affordable</div>
+            <div class="icon peach">🎮</div>
+            <h3>Consumer GPUs</h3>
+            <ul>
+              <li>NVIDIA, AMD, Intel</li>
+              <li>~8–16 GB VRAM</li>
+              <li>Fast for small mid models, buy used</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.16s">
+            <div class="tag blue">Middle ground</div>
+            <div class="icon blue">⚙️</div>
+            <h3>Unified memory</h3>
+            <ul>
+              <li>Apple MacBooks, NVIDIA DGX Spark</li>
+              <li>Large, fast shared memory</li>
+              <li>Runs bigger models in one box</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.22s">
+            <div class="tag pink">Most expensive</div>
+            <div class="icon pink">🧠</div>
+            <h3>Workstation GPUs</h3>
+            <ul>
+              <li>e.g. RTX 6000 Pro</li>
+              <li>Lots of VRAM, pricey</li>
+              <li>Heaviest local setups, multi-GPU</li>
+            </ul>
+          </div>
+        </div>
+        <div class="callout reveal" style="--d:.28s">
+          <div class="emoji">💡</div>
+          <p><strong>What matters:</strong> <span>VRAM capacity and memory bandwidth</span></p>
+        </div>
+        <div class="foot">
+          <div class="hint">Hardware</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 8 · Hardware in pictures -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Hardware</div>
+        <h2 class="reveal">Hardware examples</h2>
+        <div class="grid cols-2" style="margin-top:2rem">
+          <div class="img-card reveal" style="--d:.05s">
+            <span class="tag green">Consumer GPU</span>
+            <img src="nvidia-rtx-3000.png" alt="Consumer GPU">
+            <div class="cap"><b>NVIDIA RTX</b> · affordable &amp; common</div>
+          </div>
+          <div class="img-card reveal" style="--d:.1s">
+            <span class="tag blue">Unified memory</span>
+            <img src="mbp14-spaceblack-120613948.png" alt="Apple MacBook Pro">
+            <div class="cap"><b>Apple MacBook</b> · unified memory</div>
+          </div>
+          <div class="img-card reveal" style="--d:.15s">
+            <span class="tag blue">Unified memory</span>
+            <img src="NVIDIA-DGX-Spark-1-2391470503.png" alt="NVIDIA DGX Spark">
+            <div class="cap"><b>NVIDIA DGX Spark</b> · unified memory</div>
+          </div>
+          <div class="img-card reveal" style="--d:.2s">
+            <span class="tag pink">Workstation GPU</span>
+            <img src="NVIDIA-RTX-PRO-6000-Blackwell-Max-Q-Workstation-Edition-Front-3974189098.png" alt="NVIDIA RTX PRO 6000">
+            <div class="cap"><b>NVIDIA RTX PRO 6000</b> · workstation</div>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="hint">Hardware</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9 · Tools -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">The ecosystem</div>
+        <h2 class="reveal">Pick your tool</h2>
+        <div class="grid cols-4" style="margin-top:1.6rem">
+          <div class="card reveal" style="--d:.04s">
+            <div class="tag green">Easiest</div>
+            <h3>🦙 Ollama</h3>
+            <ul>
+              <li>CLI + model manager</li>
+              <li><strong>One command</strong>, API &amp; server built in</li>
+              <li>Best starting point</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.1s">
+            <div class="tag pink">Experiment</div>
+            <h3>⚙️ llama.cpp</h3>
+            <ul>
+              <li>Convenient tool for experimentation</li>
+              <li>Runs on <strong>CPU</strong> as well as GPU</li>
+              <li>Ollama is built on top of it</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.16s">
+            <div class="tag blue">GPU clusters</div>
+            <h3>⚡ vLLM / sglang</h3>
+            <ul>
+              <li>Production-grade serving engine</li>
+              <li>Great throughput for many requests</li>
+              <li>GPU-focused</li>
+            </ul>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="hint">Tools</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 10 · Live walkthrough -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Hands-on</div>
+        <h2 class="reveal">From zero to hero with ollama</h2>
+        <pre class="code reveal" style="--d:.06s"><span class="c"># 1 · install Ollama</span>
+<span class="k">curl</span> -fsSL https://ollama.com/install.sh | sh
+
+<span class="c"># 2 · pull a model</span>
+<span class="k">ollama</span> pull qwen3.6:latest
+
+<span class="c"># 3 · chat right away</span>
+<span class="k">ollama</span> run qwen3.6:latest
+
+<span class="c"># 4 · it's also an API</span>
+<span class="k">curl</span> http://localhost:11434/api/chat <span class="v">-d</span> '{"model":"qwen3.6:latest","stream":false}'</pre>
+        <div class="foot">
+          <div class="hint">Live demo</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 11 · Where to get models -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Sourcing</div>
+        <h2 class="reveal">Where to get models</h2>
+        <ul class="bullets" style="margin-top:1.4rem">
+          <li class="reveal" style="--d:.04s"><a href="https://huggingface.co" target="_blank" rel="noopener">huggingface.co</a> is the GitHub of data science</li>
+          <li class="reveal" style="--d:.1s">ollama provides a curated set of models (cloud and local)</li>
+          <li class="reveal" style="--d:.16s"><strong>⚠️ Running unofficial models from huggingface can RCE!</strong></li>
+        </ul>
+        <div class="grid cols-2" style="margin-top:2rem">
+          <div class="img-card reveal" style="--d:.1s">
+            <a href="https://huggingface.co" target="_blank" rel="noopener">
+              <div class="shot-cap bubble">huggingface.co <span>· the GitHub of data science</span></div>
+              <img class="shot" src="hf-qwen.png" alt="Hugging Face">
+            </a>
+          </div>
+          <div class="img-card reveal" style="--d:.16s">
+            <a href="https://ollama.com/search" target="_blank" rel="noopener">
+              <div class="shot-cap mint">ollama.com / search <span>· curated pick</span></div>
+              <img class="shot" src="hf-ollama.png" alt="Ollama model search">
+            </a>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="hint">Sourcing</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 12 · Tooling -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Now what?</div>
+        <h2 class="reveal">You’ve got a model running</h2>
+        <ul class="bullets" style="margin-top:1.6rem">
+          <li class="reveal" style="--d:.04s">You’re set: hardware + a model running locally</li>
+          <li class="reveal" style="--d:.1s">That means you got a <strong>local OpenAPI-compatible HTTP API server</strong></li>
+          <li class="reveal" style="--d:.16s">Now you need <strong>tooling</strong>: a harness or integration to actually use it</li>
+          <li class="reveal" style="--d:.22s"><strong>My favorites:</strong> Claude Code &amp; Open WebUI</li>
+        </ul>
+        <div class="callout reveal" style="--d:.32s">
+          <div class="emoji">🔌</div>
+          <p><strong>It’s just an API.</strong> <span>Anything that speaks the OpenAI protocol can point at your local model: CLIs, chat UIs, editors, home automation.</span></p>
+        </div>
+        <div class="foot">
+          <div class="hint">Tooling</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 13 · Fun fact -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">About this deck</div>
+        <h2 class="reveal">Fun fact</h2>
+        <p class="lead reveal" style="--d:.06s">Slides made with an open weights LLM, using <a href="https://pi.dev" target="_blank" rel="noopener">pi.dev</a> (friendly bring-your-own-LLM “agent” tool that doesn’t phone home).</p>
+        <div class="grid cols-2" style="margin-top:2rem">
+          <div class="card reveal" style="--d:.12s">
+            <div class="icon pink">🧠</div>
+            <h3>DeepSeek-V4-Flash</h3>
+            <p>Model version <strong>0731</strong>, the summarizer that wrote these slides.</p>
+          </div>
+          <div class="card reveal" style="--d:.16s">
+            <div class="icon peach">⚙️</div>
+            <h3>Running on 4× RTX 6000 Pro</h3>
+            <p>Served locally on a host with four NVIDIA RTX 6000 Pro GPUs.</p>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="hint">About this deck</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 14 · Resources -->
+    <section class="slide">
+      <div class="inner">
+        <div class="kicker reveal">Go deeper</div>
+        <h2 class="reveal">Resources to explore</h2>
+        <div class="grid cols-2" style="margin-top:2rem">
+          <div class="card reveal" style="--d:.04s">
+            <h3><a href="https://ollama.com" target="_blank" rel="noopener">🦙 olmstrom · ollama.com</a></h3>
+            <ul>
+              <li>Easiest way to run models: install, pull, run</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.08s">
+            <h3><a href="https://huggingface.co" target="_blank" rel="noopener">🤗 huggingface.co</a></h3>
+            <ul>
+              <li>The model hub, where every model &amp; quant lives</li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.12s">
+            <h3><a href="https://github.com/ggerganov/llama.cpp" target="_blank" rel="noopener">⚙️ github.com/ggerganov/llama.cpp</a></h3>
+            <ul>
+              <li>The engine under the hood</li>
+              <li>Quantization tools like <strong>llama-quantize</strong></li>
+            </ul>
+          </div>
+          <div class="card reveal" style="--d:.16s">
+            <h3><a href="https://lmstudio.ai" target="_blank" rel="noopener">💾 lmstudio.ai</a></h3>
+            <ul>
+              <li>Graphical chat, no terminal required</li>
+            </ul>
+          </div>
+        </div>
+        <div class="foot">
+          <div class="hint">Resources</div>
+          <div class="hint"><kbd>→</kbd> next</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 15 · Thanks -->
+    <section class="slide">
+      <div class="inner thanks">
+        <div class="emoji-row reveal">🤖✨💾</div>
+        <h1 class="reveal" style="--d:.06s">Thank you</h1>
+        <p class="lead reveal" style="--d:.12s; max-width:46ch; margin:0 auto;">Any questions?</p>
+      </div>
+    </section>
+
+  </main>
+
+<script>
+  const deck = document.getElementById('deck');
+  const slides = Array.from(deck.querySelectorAll('section.slide'));
+  const total = slides.length;
+  let cur = 0;
+  let touchStartX = null;
+
+  document.getElementById('total').textContent = total;
+
+  function show(n) {
+    cur = Math.max(0, Math.min(total - 1, n));
+    slides.forEach((s, i) => s.classList.toggle('active', i === cur));
+    document.getElementById('cur').textContent = cur + 1;
+    document.getElementById('progress').style.width = ((cur + 1) / total * 100) + '%';
+    try { localStorage.setItem('local-llm-deck-slide', String(cur)); } catch (e) {}
+  }
+
+  function next() { show(cur + 1); }
+  function prev() { show(cur - 1); }
+
+  // keyboard
+  document.addEventListener('keydown', (e) => {
+    if (['ArrowRight', 'ArrowDown', ' ', 'PageDown', 'Enter'].includes(e.key)) { e.preventDefault(); next(); }
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); prev(); }
+    else if (e.key === 'Home') show(0);
+    else if (e.key === 'End') show(total - 1);
+    else if (e.key === 'F' || e.key === 'f') toggleFullscreen();
+  });
+
+  // mouse wheel (debounced lightly)
+  let wheelLock = false;
+  document.addEventListener('wheel', (e) => {
+    if (wheelLock) return;
+    const delta = e.deltaY || e.deltaX;
+    if (Math.abs(delta) < 20) return;
+    wheelLock = true;
+    if (delta > 0) next(); else prev();
+    setTimeout(() => wheelLock = false, 650);
+  }, { passive: true });
+
+  // trackpad: use pointer-down position to detect left/right swipes on click
+  document.addEventListener('pointerdown', (e) => { touchStartX = e.clientX; touchStartY = e.clientY; });
+
+  // click = next; drag-to-select text = don't navigate; swipes (no selection) still navigate
+  document.addEventListener('pointerup', (e) => {
+    if (touchStartX === null) return;
+    // ignore clicks on interactive controls (e.g. the fullscreen button) and links
+    if (e.target.closest && e.target.closest('button, a')) { touchStartX = touchStartY = null; return; }
+    const dx = e.clientX - touchStartX;
+    const dy = e.clientY - touchStartY;
+    const dist = Math.hypot(dx, dy);
+    touchStartX = null; touchStartY = null;
+
+    // if the user dragged to highlight text, don't navigate the deck
+    const sel = (window.getSelection && window.getSelection().toString()) || '';
+    if (sel.length > 0) return;
+
+    if (dist > 40) {
+      // a swipe with no text selected → navigate by direction
+      if (Math.abs(dx) > Math.abs(dy)) { if (dx < 0) next(); else prev(); }
+      else { if (dy > 0) next(); else prev(); }
+    } else if (dist < 8) {
+      // clean click → move forward
+      next();
+    }
+    // medium drags with no text selected: do nothing
+  });
+
+  // fullscreen toggle
+  const fsBtn = document.getElementById('fullscreenBtn');
+  const fsLabel = document.getElementById('fullscreenLabel');
+  function inFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+  function updateFsLabel() {
+    const fs = inFullscreen();
+    fsLabel.textContent = fs ? 'Exit' : 'Fullscreen';
+    fsBtn.classList.toggle('hidden', fs);
+  }
+  fsBtn.addEventListener('click', () => toggleFullscreen());
+  function toggleFullscreen() {
+    try {
+      if (inFullscreen()) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else {
+        const el = document.documentElement;
+        (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      }
+    } catch (e) {}
+  }
+  document.addEventListener('fullscreenchange', updateFsLabel);
+  document.addEventListener('webkitfullscreenchange', updateFsLabel);
+
+  // restore the slide you were on before the last reload
+  let saved = cur;
+  try {
+    const s = parseInt(localStorage.getItem('local-llm-deck-slide'), 10);
+    if (!isNaN(s)) saved = s;
+  } catch (e) {}
+  show(saved);
+</script>
+</body>
+</html>
